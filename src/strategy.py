@@ -15,10 +15,10 @@ class Strategy:
         self.results = []
         
     def buy_condition(self, index) -> bool:
-        pass
+        raise NotImplementedError("Buy condition not implemented.")
     
     def sell_condition(self, index) -> bool:
-        pass
+        raise NotImplementedError("Sell condition not implemented.")
     
     def run(self):
         for i in range(len(self.data)):
