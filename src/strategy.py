@@ -1,3 +1,7 @@
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+
 class Strategy:
     
     def __init__(self, data):
@@ -28,7 +32,30 @@ class Strategy:
                 self.trades.append(('sell', self.data[i]))
         return self.trades
     
-    def evaluate(self, results):
+    def build_results(self):
+        results = []
+        entry = None
+
+        for action, candle in self.trades:
+            price = candle['close']
+
+            if action == 'buy':
+                entry = price
+
+            elif action == 'sell' and entry is not None:
+                profit = price - entry
+                results.append({
+                    'entry': entry,
+                    'exit': price,
+                    'profit': profit
+                })
+                entry = None
+
+        return results
+    
+    def evaluate(self):
+        results = self.build_results()
+
         profits = [r['profit'] for r in results if r['profit'] > 0]
         losses = [r['profit'] for r in results if r['profit'] <= 0]
 
@@ -45,28 +72,24 @@ class Strategy:
         for r in results:
             equity += r['profit']
             peak = max(peak, equity)
-            self.max_realized_drawdown = max(
-                self.max_realized_drawdown,
-                peak - equity
-            )
+            self.max_realized_drawdown = max(peak - equity, self.max_realized_drawdown)
 
         # -------- unrealized drawdown --------
         in_position = False
-        entry_price = 0.0
         peak_price = 0.0
         self.max_unrealized_drawdown = 0.0
 
         trade_idx = 0
 
         for i in range(len(self.data)):
-            price = self.data[i]
+            price = self.data[i]['close']
 
             if trade_idx < len(self.trades):
-                action, trade_price = self.trades[trade_idx]
+                action, candle = self.trades[trade_idx]
+                trade_price = candle['close']
 
                 if action == 'buy':
                     in_position = True
-                    entry_price = trade_price
                     peak_price = trade_price
                     trade_idx += 1
 
@@ -76,10 +99,9 @@ class Strategy:
 
             if in_position:
                 peak_price = max(peak_price, price)
-                dd = peak_price - price
                 self.max_unrealized_drawdown = max(
                     self.max_unrealized_drawdown,
-                    dd
+                    peak_price - price
                 )
 
         return {
