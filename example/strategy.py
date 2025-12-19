@@ -1,3 +1,7 @@
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+
 class Strategy:
     
     def __init__(self, data):
@@ -14,13 +18,81 @@ class Strategy:
         self.total_return = 0.0
         self.results = []
         
+    def _rsi(self, index, length=14):
+        if index < length:
+            return None
+
+        gains = 0.0
+        losses = 0.0
+
+        for i in range(index - length + 1, index + 1):
+            prev_close = self.data[i - 1]['close']
+            close = self.data[i]['close']
+            delta = close - prev_close
+
+            if delta > 0:
+                gains += delta
+            else:
+                losses -= delta
+
+        if losses == 0:
+            return 100.0
+
+        rs = gains / losses
+        return 100 - (100 / (1 + rs))
+        
     def buy_condition(self, index) -> bool:
         """
-        Buy when closing is below rsi 20, length 14. 
+        Buy when RSI(14) < 20 && time is between 9:30 and 16:00
         """
-    
+        if self.current_position is not None:
+            return False
+        
+        # Check unix timestamp
+        ts = self.data[index]['timestamp']
+        dt = datetime.fromtimestamp(ts, tz=ZoneInfo("America/New_York"))
+
+        if not (dt.hour > 9 or (dt.hour == 9 and dt.minute >= 30)):
+            return False
+        if not (dt.hour < 16):
+            return False
+
+        rsi = self._rsi(index)
+        if rsi is None:
+            return False
+
+        if rsi < 20:
+            self.current_position = self.data[index]['close']
+            return True
+
+        return False
+
     def sell_condition(self, index) -> bool:
-        pass
+        """
+        Sell when RSI(14) > 80 && time is between 9:30 and 16:00
+        """
+        if self.current_position is None:
+            return False
+        
+        # Check unix timestamp
+        ts = self.data[index]['timestamp']
+        dt = datetime.fromtimestamp(ts, tz=ZoneInfo("America/New_York"))
+
+        if not (dt.hour > 9 or (dt.hour == 9 and dt.minute >= 30)):
+            return False
+        if not (dt.hour < 16):
+            return False
+
+        rsi = self._rsi(index)
+        if rsi is None:
+            return False
+
+        if rsi > 80:
+            self.current_position = None
+            return True
+
+        return False
+
     
     def run(self):
         for i in range(len(self.data)):
@@ -30,7 +102,30 @@ class Strategy:
                 self.trades.append(('sell', self.data[i]))
         return self.trades
     
-    def evaluate(self, results):
+    def build_results(self):
+        results = []
+        entry = None
+
+        for action, candle in self.trades:
+            price = candle['close']
+
+            if action == 'buy':
+                entry = price
+
+            elif action == 'sell' and entry is not None:
+                profit = price - entry
+                results.append({
+                    'entry': entry,
+                    'exit': price,
+                    'profit': profit
+                })
+                entry = None
+
+        return results
+    
+    def evaluate(self):
+        results = self.build_results()
+
         profits = [r['profit'] for r in results if r['profit'] > 0]
         losses = [r['profit'] for r in results if r['profit'] <= 0]
 
@@ -47,28 +142,24 @@ class Strategy:
         for r in results:
             equity += r['profit']
             peak = max(peak, equity)
-            self.max_realized_drawdown = max(
-                self.max_realized_drawdown,
-                peak - equity
-            )
+            self.max_realized_drawdown = max(peak - equity, self.max_realized_drawdown)
 
         # -------- unrealized drawdown --------
         in_position = False
-        entry_price = 0.0
         peak_price = 0.0
         self.max_unrealized_drawdown = 0.0
 
         trade_idx = 0
 
         for i in range(len(self.data)):
-            price = self.data[i]
+            price = self.data[i]['close']
 
             if trade_idx < len(self.trades):
-                action, trade_price = self.trades[trade_idx]
+                action, candle = self.trades[trade_idx]
+                trade_price = candle['close']
 
                 if action == 'buy':
                     in_position = True
-                    entry_price = trade_price
                     peak_price = trade_price
                     trade_idx += 1
 
@@ -78,10 +169,9 @@ class Strategy:
 
             if in_position:
                 peak_price = max(peak_price, price)
-                dd = peak_price - price
                 self.max_unrealized_drawdown = max(
                     self.max_unrealized_drawdown,
-                    dd
+                    peak_price - price
                 )
 
         return {
