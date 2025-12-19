@@ -21,7 +21,7 @@ if __name__ == "__main__":
             
             strat = Strategy(data) # Test on the 5 minute data.
             trades = strat.run()
-            results = strat.evaluate(trades) # Calculate metrics based on trades
+            results = strat.evaluate() # Calculate metrics based on trades
             print(f"Results for {file_name}:")
             print(results)
             
